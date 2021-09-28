@@ -157,6 +157,22 @@ enum class fail_basis
     invo,
 };
 
+class beam_ability_target_behaviour : public targeting_behaviour
+{
+    public:
+    int hit;
+    virtual vector<string> get_monster_desc(const monster_info& mi) override;
+};
+
+vector<string> beam_ability_target_behaviour::get_monster_desc(const monster_info& mi)
+{
+    vector<string> descs;
+    const int hit_pct = beam_to_hit_pct(mi, hit, true);
+    descs.emplace_back(make_stringf("%d%% to hit", hit_pct));
+    return descs;
+}
+
+
 /**
  * What skill is used to determine the player's god's invocations' failure
  * chance?
@@ -2140,8 +2156,13 @@ static spret _do_ability(const ability_def& abil, bool fail, dist *target)
     {
         int power = 10 + you.experience_level;
         beam.range = _calc_breath_ability_range(abil.ability);
+        direction_chooser_args args;
+        beam_ability_target_behaviour beh{};
+        beh.hit = zap_to_hit(ZAP_SPIT_POISON, power, true);
+        args.mode = TARG_HOSTILE;
+        args.behaviour = &beh;
 
-        if (!spell_direction(*target, beam)
+        if (!spell_direction(*target, beam, &args)
             || !player_tracer(ZAP_SPIT_POISON, power, beam))
         {
             return spret::abort;
@@ -2158,10 +2179,15 @@ static spret _do_ability(const ability_def& abil, bool fail, dist *target)
     case ABIL_BREATHE_ACID:       // Draconian acid splash
     {
         beam.range = _calc_breath_ability_range(abil.ability);
+        int power = (you.form == transformation::dragon) ?
+                2 * you.experience_level : you.experience_level;
         targeter_splash hitfunc(&you, beam.range);
         direction_chooser_args args;
+        beam_ability_target_behaviour beh{};
+        beh.hit = zap_to_hit(ZAP_BREATHE_ACID, power, false);
         args.mode = TARG_HOSTILE;
         args.hitfunc = &hitfunc;
+        args.behaviour = &beh;
         if (!spell_direction(*target, beam, &args))
             return spret::abort;
 
@@ -2169,8 +2195,7 @@ static spret _do_ability(const ability_def& abil, bool fail, dist *target)
             return spret::abort;
 
         fail_check();
-        zapping(ZAP_BREATHE_ACID, (you.form == transformation::dragon) ?
-                2 * you.experience_level : you.experience_level,
+        zapping(ZAP_BREATHE_ACID, power,
                 beam, false, "You spit a glob of acid.");
 
         you.increase_duration(DUR_BREATH_WEAPON,
